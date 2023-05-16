@@ -10,8 +10,7 @@ library (data.table)
 #library (ComplexHeatmap)
 #library (ggplot2)
 
-utils <- "C:\\Users\\isido\\bp_utils\\"
-source(paste0(utils,"ManageScriptData.R"))
+source("..\\Helper_R_Scripts\\ManageScriptData.R")
 WriteSessionInfo()
 WriteInstalledPackages()
 ```
@@ -19,21 +18,26 @@ WriteInstalledPackages()
 
 ```{r, Import Data}
 
-npout <- fread("MehdisNPdata\\outputs_propagations_individual_noNorm.txt") # x0 is input heat, xss_t is propagated heat
-npin <- fread("MehdisNPdata\\inputs_pi.txt")
+# you may need to change file locations for your computer/working directory
+getwd()
 
-stringNet <- fread("MehdisNPdata\\network_STRING_400cs.txt")
+
+npout <- fread("..\\Input_Data\\MehdiNP_outputs_nonorm.txt") # x0 is input heat, xss_t is propagated heat
+npin <- fread("..\\Input_Data\\MehdiNP_inputs.txt")
+
+stringNet <- fread("https://stringdb-static.org/download/protein.links.detailed.v11.5/9606.protein.links.detailed.v11.5.txt.gz")
 stringNet <- stringNet[combined_score >= 600]
 
-aliases <- fread( "C:\\Users\\isido\\OneDrive\\Documents\\Krogan Lab Code\\Universal_Datasets\\STRING_files\\Human_9606.protein.aliases.v11.5.txt")
+aliases <- fread("https://stringdb-static.org/download/protein.aliases.v11.5/9606.protein.aliases.v11.5.txt.gz")
 setnames(aliases, "#string_protein_id", "stringID")
 
-load("C:/Users/isido/github/TBRU_integration_data/data_clean/Cox_model/Cox_NG_screen_model.RData")
-load("C:/Users/isido/github/TBRU_integration_data/data_clean/Cox_model/Cox_AWR_screen_model.RData")
+load("..\\..\\TBRU_integration_data/data_clean/Cox_model/Cox_NG_screen_model.RData")
+load("..\\..\\TBRU_integration_data/data_clean/Cox_model/Cox_AWR_screen_model.RData")
 # convert to human homologs !!!!
 
 
-tbPPI <- fread("TBsecretedAPMS_NIHMS1503192-supplement-5.csv")
+
+tbPPI <- fread("..\\Input_Data\\TBsecretedAPMS_NIHMS1503192-supplement-5.csv")
 setnames(tbPPI, c("Bacterial Bait  (Locus ID)", "Human Protein Uniprot", "Human Gene name"), c("Bait", "Prey", "GeneName")) 
 
 ```
@@ -302,7 +306,7 @@ infliNosPos.info <- genNodeInfo(infliNosPos.paths) [allsymbols, symbol := i.symb
 
 
 ```{r, Prepare Enrichment}
-source (paste0(utils,"enrichmentTestFunctions.R"))
+source("..\\Helper_R_Scripts\\enrichmentTestFunctions.R")
 
 # Prepare gene groups
 vsAK.geneGroups <- vsAK.nodeInfo[, .(symbol, source)]
