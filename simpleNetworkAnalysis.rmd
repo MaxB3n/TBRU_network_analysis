@@ -1,0 +1,390 @@
+---
+title: "TBRU Simple Pathway Analysis"
+output: html_document
+updated: "2023-05-04"
+started: "2023-04-06"
+---
+
+```{r, Dependencies}
+library (data.table)
+#library (ComplexHeatmap)
+#library (ggplot2)
+
+utils <- "C:\\Users\\isido\\bp_utils\\"
+source(paste0(utils,"ManageScriptData.R"))
+WriteSessionInfo()
+WriteInstalledPackages()
+```
+
+
+```{r, Import Data}
+
+npout <- fread("MehdisNPdata\\outputs_propagations_individual_noNorm.txt") # x0 is input heat, xss_t is propagated heat
+npin <- fread("MehdisNPdata\\inputs_pi.txt")
+
+stringNet <- fread("MehdisNPdata\\network_STRING_400cs.txt")
+stringNet <- stringNet[combined_score >= 600]
+
+aliases <- fread( "C:\\Users\\isido\\OneDrive\\Documents\\Krogan Lab Code\\Universal_Datasets\\STRING_files\\Human_9606.protein.aliases.v11.5.txt")
+setnames(aliases, "#string_protein_id", "stringID")
+
+load("C:/Users/isido/github/TBRU_integration_data/data_clean/Cox_model/Cox_NG_screen_model.RData")
+load("C:/Users/isido/github/TBRU_integration_data/data_clean/Cox_model/Cox_AWR_screen_model.RData")
+# convert to human homologs !!!!
+
+
+tbPPI <- fread("TBsecretedAPMS_NIHMS1503192-supplement-5.csv")
+setnames(tbPPI, c("Bacterial Bait  (Locus ID)", "Human Protein Uniprot", "Human Gene name"), c("Bait", "Prey", "GeneName")) 
+
+```
+
+
+```{r, map mouse crispr data to human}
+mouseUPIDmap <- fread("C:\\Users\\isido\\OneDrive\\Documents\\Krogan Lab Code\\Universal_Datasets\\Species_to_species\\Mouse-Human\\MouseUPIDS2Symbols.csv")
+mouseUPIDmap[, MouseSymbol := toupper(mouseUPIDmap$MouseSymbol)]
+mouseHumanUPIDmap <- fread("C:\\Users\\isido\\OneDrive\\Documents\\Krogan Lab Code\\Universal_Datasets\\Species_to_species\\Mouse-Human\\ToHumanUPIDs_FromMouseUPIDs.csv")
+humanUPIDmap <- fread("C:\\Users\\isido\\OneDrive\\Documents\\Krogan Lab Code\\Universal_Datasets\\Species_to_species\\Mouse-Human\\humanSymbol-uniprotQueryResults.tsv")
+
+log2fct <- 1
+fdrt <- 0.05
+
+awrKDs <- data.table(awr_cox)[abs(log2FC) >= log2fct & FDR <= fdrt, .(symbol, log2FC), by = contrast]
+ngKDs <- data.table(ng_cox)[abs(log2FC) >= log2fct & FDR <= fdrt, .(symbol, log2FC), by = contrast]
+
+unmappedUpCrisprKDs <- awrKDs[!awrKDs$symbol %in%  mouseUPIDmap$MouseSymbol,]     # all from awr experiment
+
+#map upids
+awrKDs[mouseUPIDmap, mouseUPID := i.mouseUPID, on = .(symbol = MouseSymbol)]
+ngKDs[mouseUPIDmap, mouseUPID := i.mouseUPID, on = .(symbol = MouseSymbol)]
+
+#map human upids
+awrKDs[mouseHumanUPIDmap, huUPID := i.To, on = .(mouseUPID = From)]
+ngKDs[mouseHumanUPIDmap, huUPID := i.To, on = .(mouseUPID = From)]
+
+#map human symbols
+awrKDs[humanUPIDmap, huSymbol := i.From, on = .(huUPID = To)]
+ngKDs[humanUPIDmap, huSymbol := i.From, on = .(huUPID = To)]
+
+```
+
+
+```{r, Format Data}
+
+tbPPI <- tbPPI[ MIST >= 0.7, ]
+
+
+npout <- npout[pval < 0.05]
+npout[aliases[alias %in% npout$nodes,], string := i.stringID, on = .(nodes = alias)]
+awrKDs[aliases[alias %in% awrKDs$huSymbol,], string := i.stringID, on = .(huSymbol = alias)]
+ngKDs[aliases[alias %in% ngKDs$huSymbol,], string := i.stringID, on = .(huSymbol = alias)]
+tbPPI[aliases[alias %in% tbPPI$Prey,], string := i.stringID, on = .(Prey = alias)]
+
+
+allsymbols <- rbind(npout[, .(string, symbol = nodes)], awrKDs[, .(string, symbol = huSymbol)], ngKDs[, .(string, symbol = huSymbol)], tbPPI[, .(string, symbol = GeneName)])
+
+allKDs <- c(ngKDs[!is.na(string) & !is.na(huSymbol), string], 
+            awrKDs[!is.na(string)& !is.na(huSymbol) & huSymbol != "SLFN5", string])
+
+shortlist <- c(npout$string, allKDs, tbPPI$string)
+net <- stringNet[ protein1 %in% shortlist & protein2 %in% shortlist]
+# shrinks string network with 20,000 nodes and 800,000 edges (w/ score > 600) to 5000 nodes and 180,000 edges
+```
+
+
+``` {r, igraphification}
+
+library(igraph)
+
+graph <- igraph::graph_from_edgelist(as.matrix(net[, .(protein1, protein2)]))
+distances <- igraph::distances(graph)
+
+```
+
+
+```{r, shortest paths wrapper fxn}
+ 
+find_shortestPaths <- function(startpoints, targets, distances){
+
+  closestTarget <- data.table(interactor = startpoints)
+  closestTarget[, knockdown := lapply(closestTarget$interactor, FUN = function(x, candidates, distances){
+                                  candidateNodeDistances <- distances[x,candidates][!distances[x,candidates] == 0]
+                                  return (data.table(candidateNodeDistances, names(candidateNodeDistances))[candidateNodeDistances == min(candidateNodeDistances),V2] )
+                                  }, candidates = targets, distances = distances)]
+  
+  paths <- lapply( 1:nrow(closestTarget), FUN = function(i, targets, graph){
+    igraph::shortest_paths( graph, closestTarget[i, interactor], closestTarget[i, knockdown][[1]] )$vpath
+  }, targets = closestTargets, graph = graph)
+  paths <- unlist(paths, recursive = F)
+  
+  nodes <- unique(names(unlist(paths)))
+  
+  edges <- unlist(lapply(paths, FUN = function(path){
+       return(lapply(1:(length(path) -1), FUN = function(n, path){
+         if (length(path) == 0){
+           return(NULL)
+         } else{ return( c(names(path[n]),names(path[n+1])) ) }
+       }, path = path))
+     }))
+  
+  return(list(paths = paths, nodes = nodes, edges = edges))
+}
+
+# returns $paths, $nodes, and $edges data structures:
+#   $paths is unlisted raw igraph paths
+#   $nodes is a list of all unique nodes in all paths
+#   $edges is a list of edges for igraph formatted c(a,b, b,c, c,d, e,f, etc. )
+
+```
+
+
+```{r, shortest path against allKD at once}
+
+### Get Shortest Path Results ###
+vsAllKds.paths <- find_shortestPaths(allKDs, tbPPI[string %in% rownames(distances), string], distances)
+# has $paths, $nodes, and $edges data structures
+vsAllKds.paths$edgemat <- matrix(vsAllKds.paths$edges, ncol = 2, byrow = T)
+vsAK.graph <- simplify(igraph::graph_from_edgelist(vsAllKds.paths$edgemat) )
+
+
+### Flesh Out NodeInfo For Shortest Path Graph ###
+vsAK.degree <- igraph::degree(vsAK.graph)
+vsAK.eig <- igraph::evcent(vsAK.graph)$vector
+vsAK.betw <- igraph::betweenness(vsAK.graph)
+vsAK.reach <- (ego_size(vsAK.graph, 2)-1)/(vcount(vsAK.graph)-1)
+
+vsAK.nodeInfo <- data.table(string = vsAllKds.paths$nodes, betweenness = vsAK.betw, degree = vsAK.degree, eigen = vsAK.eig, reach = vsAK.reach)
+vsAK.nodeInfo[allsymbols, symbol := i.symbol, on = .(string)] [, symbol := tstrsplit(symbol, split = ";| " , keep = 1)]
+vsAK.nodeInfo [, source := "inpath"] [string %in% allKDs, source := "crispr"] [string %in% tbPPI$string, source := "ppi"]  [string %in% tbPPI$string & string %in% allKDs, source := "both"] 
+
+vsAK.nodeInfo[data.table(vsAllKds.paths$edges)[, .N, by = V1], npaths := i.N, on = .(string = V1)]
+
+
+### Some Summarization ###
+round(cor(vsAK.nodeInfo[, .(degree, betweenness, eigen, reach, npaths)]),2)
+#setorder(vsAK.nodeInfo, betweenness)
+#vsAK.nodeInfo
+
+```
+
+# IDEAS FROM COMP MEETING
+#-shortest paths with unweighted network using netprop or just hits from any dataset
+#-shortest paths weighted using scores from different networks 
+
+#-generate random shortest paths and normalize centrality/other measures to random results
+#-look for ppi that cant connect to crispr and crispr that cant connect to ppi
+#-run both ways, ppi->crispr and crispr-> ppi
+#-centrality measures, genes that come up in multiple paths, genes that come up in other datasets, gene enrichment
+#-spend some time thinking about what you'd look for to find: biomarkers, mechanisms of tb infection, drug targets
+
+#-add tb factor bait-prey edges to string network and calc shortest paths from meningitis-associated genes to tb baits
+#-> validate against clinical hits
+
+
+```{r, Analysis}
+
+# this function calculates centrality measures for each node in a graph: betweenness, degree, npaths, eigenvector centrality (which is essentially the same as the better known measures "hub/authority" in an undirected graph), and reach
+genNodeInfo <- function(pathsobj){
+   
+    pathsobj$edgemat <- matrix(pathsobj$edges, ncol = 2, byrow = T)
+    temp.graph <- simplify(igraph::graph_from_edgelist(pathsobj$edgemat) )
+
+    nodeInfo <- data.table(string = pathsobj$nodes, betweenness = igraph::betweenness(temp.graph), degree = igraph::degree(temp.graph), eigen = igraph::evcent(temp.graph)$vector, reach = (ego_size(temp.graph, 2)-1)/(vcount(temp.graph)-1))
+    nodeInfo[data.table(pathsobj$edges)[, .N, by = V1], npaths := i.N, on = .(string = V1)]
+    
+    return(nodeInfo)
+}
+# This 
+calculateRandomShortestPaths <- function(nstarts, ntargets, niter, distances, graph){
+  #pb <- txtProgressBar(min = 0, max = 100, style = 3)        # progress bar for singlethreaded process
+    
+  # Setting up multithreaded process to speed up run time -- this is written to work for Windows
+    library(parallel)
+    library(doParallel)
+    library(pbapply)
+  # Prepare the Clustering
+    numCores <- round(parallel::detectCores() * .70)
+    cl <- makeCluster(numCores) 
+    registerDoParallel(cl)
+    clusterExport(cl, list( "find_shortestPaths", "nstarts", "ntargets", "distances", "graph", "genNodeInfo" ), envir = environment())
+    clusterEvalQ(cl,library("igraph"))
+    clusterEvalQ(cl,library("data.table"))
+
+  # for n iterations, pick x random starts and y random targets as supplied at the start of fxn, find shortest paths as above, and return centrality measures for each node in nodeInfo
+  return(pbapply::pblapply( 1:niter, FUN = function(n){
+    starts <- rownames(distances)[sample.int(nrow(distances), nstarts)]
+    targets <- rownames(distances)[sample.int(nrow(distances),ntargets)]
+    #setTxtProgressBar(pb, round(n/niter*100, 0))       # progress bar for singlethreaded process
+    paths <- suppressWarnings(find_shortestPaths(starts, targets, distances) ) 
+    return(genNodeInfo(paths))
+    }, cl = cl))
+}
+
+```
+
+
+```{r, normalize measures}
+
+# Run above fxn to generate background values for node centrality for normalizing our 'experimental' centrality values
+# THIS WILL TAKE A WHILE (if you just want to test if the code works without actually normalizing anything you can try changing 1000 to 50 or something to shorten run time, but don't try to normalize with that few iterations)
+z <- calculateRandomShortestPaths(length(allKDs),nrow(tbPPI),1000,distances, graph)
+zed <- do.call(rbind, z)
+bleh <- zed[,.(betwn = mean(betweenness), degree = mean(degree), eigen = mean(eigen), reach = mean(reach), npath = mean(npaths)), by = string]
+
+vsAK.nodeInfo[bleh, c("baseBetw", "baseEigen", "baseReach", "basePaths") := .(i.betwn, i.eigen, i.reach, i.npath), on = .(string = string)]
+vsAK.nodeInfo[, c("normBetw", "normEigen", "normReach", "normPaths") := .(betweenness-baseBetw, eigen-baseEigen, reach-baseReach, npaths-basePaths)]
+```
+
+```{r, WIP to get pvalues}
+calcPval <- function(value, dist, cond = "greater"){
+  if (cond == "greater"){
+      pv <- (length(dist[dist < value]) + 1) / length(dist)
+  }
+  return(pv)
+}
+
+applyPval <- function(key, valuecols, applyTo, background, keycol = "string"){
+  
+  lapply(valuecols, FUN = function(colName){
+      return(calcPval(applyTo[[colName]], background[[colName]]))
+  }, applyTo = applyTo[applyTo[[keycol]] == key], background = background[background[[keycol]] == key] )
+  
+  return(applyTo)
+}
+
+zed <- 
+lapply( unique(vsAK.nodeInfo$string), applyPval, valuecols = c("betweenness", "degree", "eigen", "reach", "npaths"), vsAK.nodeInfo, zed )
+
+```
+
+
+```{r, Playing w Cytoscape}
+
+createNetworkFromIgraph(vsAK.graph)
+loadTableData(vsAK.nodeInfo, data.key.column = "string", table = "node")
+
+```
+
+
+```{r, invert shortest path picks }
+
+vstbPPI.paths <- find_shortestPaths(tbPPI[string %in% rownames(distances), string], allKDs, distances)
+vstbPPI.info <- genNodeInfo(vstbPPI.paths)
+
+
+y <- calculateRandomShortestPaths(nrow(tbPPI),length(allKDs),1000,distances, graph)
+yed <- do.call(rbind, y)
+bleyeh <- yed[,.(betwn = mean(betweenness), degree = mean(degree), eigen = mean(eigen), reach = mean(reach), npath = mean(npaths)), by = string]
+
+vstbPPI.info[bleyeh, c("baseBetw", "baseEigen", "baseReach", "basePaths") := .(i.betwn, i.eigen, i.reach, i.npath), on = .(string = string)]
+vstbPPI.info[, c("normBetw", "normEigen", "normReach", "normPaths") := .(betweenness-baseBetw, eigen-baseEigen, reach-baseReach, npaths-basePaths)]
+
+```
+
+
+```{r, find shortest paths to each subset of KDs separately}
+ifnbNeg <- ngKDs[!is.na(string) & !is.na(huSymbol), string]     # mix of low and high IFNB, although more high ifnb
+infliNosNeg <- awrKDs[!is.na(string)& !is.na(huSymbol) & huSymbol != "SLFN5" & sign(log2FC) == -1, string]   # all iNOS negative
+infliNosPos <-  awrKDs[!is.na(string)& !is.na(huSymbol) & huSymbol != "SLFN5" & sign(log2FC) == 1, string]   # all iNOS negative
+
+
+ifnbNeg.paths <- find_shortestPaths(tbPPI[string %in% rownames(distances), string], ifnbNeg, distances)
+infliNosNeg.paths <- find_shortestPaths(tbPPI[string %in% rownames(distances), string], infliNosNeg, distances)
+infliNosPos.paths <- find_shortestPaths(tbPPI[string %in% rownames(distances), string], infliNosPos, distances)
+
+ifnbNeg.info <- genNodeInfo(ifnbNeg.paths)[allsymbols, symbol := i.symbol, on = .(string)] [, symbol := tstrsplit(symbol, split = ";| " , keep = 1)] [, source := "inpath"] [string %in% allKDs, source := "crispr"] [string %in% tbPPI$string, source := "ppi"]  [string %in% tbPPI$string & string %in% allKDs, source := "both"] [data.table(ifnbNeg.paths$edges)[, .N, by = V1], npaths := i.N, on = .(string = V1)]
+
+infliNosNeg.info <- genNodeInfo(infliNosNeg.paths) [allsymbols, symbol := i.symbol, on = .(string)] [, symbol := tstrsplit(symbol, split = ";| " , keep = 1)] [, source := "inpath"] [string %in% allKDs, source := "crispr"] [string %in% tbPPI$string, source := "ppi"]  [string %in% tbPPI$string & string %in% allKDs, source := "both"] [data.table(infliNosNeg.paths$edges)[, .N, by = V1], npaths := i.N, on = .(string = V1)]
+
+infliNosPos.info <- genNodeInfo(infliNosPos.paths) [allsymbols, symbol := i.symbol, on = .(string)] [, symbol := tstrsplit(symbol, split = ";| " , keep = 1)] [, source := "inpath"] [string %in% allKDs, source := "crispr"] [string %in% tbPPI$string, source := "ppi"]  [string %in% tbPPI$string & string %in% allKDs, source := "both"] [data.table(infliNosPos.paths$edges)[, .N, by = V1], npaths := i.N, on = .(string = V1)]
+
+
+```
+
+
+```{r, Prepare Enrichment}
+source (paste0(utils,"enrichmentTestFunctions.R"))
+
+# Prepare gene groups
+vsAK.geneGroups <- vsAK.nodeInfo[, .(symbol, source)]
+vsAK.geneGroups <- rbind(vsAK.geneGroups, vsAK.nodeInfo[source == "both", .(symbol, source = "crispr")],  vsAK.nodeInfo[source == "both", .(symbol, source = "ppi")])
+
+vsAK.uniprotGroups <- copy(vsAK.geneGroups)
+vsAK.uniprotGroups[humanUPIDmap, upid := i.To, on = .(symbol = From)] [, symbol := NULL]
+
+setnames(vsAK.geneGroups, c("symbol", "source"), c("Protein", "Group"))
+setnames(vsAK.uniprotGroups, c("upid", "source"), c("Protein", "Group"))
+
+# Prepare Universe
+stringMap <-fread( "C:\\Users\\isido\\OneDrive\\Documents\\Krogan Lab Code\\Universal_Datasets\\STRING_files\\netprop_STRING-UNIPROT.tsv") [, `Gene Names` := tstrsplit(`Gene Names`, split = ";| " , keep = 1)]
+
+uniprotUnv <- stringMap[ From %in% unique(net$protein1), Entry]
+geneUnv <- stringMap[ From %in% unique(net$protein1), `Gene Names`]
+
+# Load gene sets
+gmtDir <- "C:\\Users\\isido\\OneDrive\\Documents\\Krogan Data\\GMTs\\"
+gmt.kegg <- fread(paste0(gmtDir,"KEGGgmt.csv"))
+gmt.go <- fread(paste0(gmtDir,"GOgmt.csv"))
+gmt.c2 <- fread(paste0(gmtDir,"GSEA.C2gmt.csv"))
+gmt.ipa <- fread(paste0(gmtDir,"IPA_pathways.txt"))
+gmt.ipap <- fread(paste0(gmtDir,"IPA_pathways_KEGG_MSigDB.txt"))
+
+#
+vsAK.enrichments <- lapply(c("go", "kegg","c2", "ipa", "ipap"), function(db, geneGroups, unvs){
+  if (db %in% c("go", "kegg", "c2")){
+    univ <- unvs[[1]]
+    gg <- geneGroups [[1]]
+  } else{ 
+    univ <- unvs[[2]]
+    gg <- geneGroups [[2]]
+  }
+  return( enricherOnGroups(groupTable = gg, geneColumn = "Protein", groupColumns = c("Group"), term2gene.gmt = get(paste0("gmt.",db)), universe = univ, numProcessors = 8))
+}, geneGroups = list(vsAK.uniprotGroups, vsAK.geneGroups), unvs = list(uniprotUnv, geneUnv) )
+names(vsAK.enrichments) <- c("go", "kegg","c2", "ipa", "ipap")
+
+
+```
+
+
+```{r, plot enrichment}
+
+### PLOT ENRICHMENT RESULTS
+# Helper fxn
+substrRight <- function(x,n){
+  substr(x,nchar(x)-n+1, nchar(x))
+}
+# Function to clean up printing heatmaps
+enrichmentNicelyFormatted <- function(en.out , topn = 2, dataSrc = "", groupSrc = "", otherAnt = "", save = FALSE, subDir = "", ...){
+    title <- paste(dataSrc, groupSrc)
+    hminfo <- enrichHeatmapBestPerGroup(en.out, NULL, groupColumn = "Group", topN = topn, max_pAdjust = 0.05, cluster_columns = FALSE, title = title, ...)
+  
+  if (save){
+    Prefix = paste(dataSrc, groupSrc, "enrichmentHeatmap", paste0("topn=",topn), sep = "_")
+  BackupAsPDF(hminfo, prefix  = Prefix, subDir = subDir )
+  }
+  return(hminfo)
+}
+
+# Enrichment Heatmaps
+enrichmentNicelyFormatted(vsAK.enrichments$go, 4, "vsAK Enrichment ", "GO", save = F)
+enrichmentNicelyFormatted(vsAK.enrichments$kegg, 4, "vsAK Enrichment ", "KEGG", save = F)
+enrichmentNicelyFormatted(vsAK.enrichments$ipap, 4, "vsAK Enrichment ", "IPAP", save = T)
+
+```
+
+
+```{r, Shortest path helper fxns (NOT USED RN)}
+
+get_neighbors_dt <- function(nodes, edges, column1  = "gene1", column2  = "gene2"){
+  do.call( rbind, lapply(nodes, FUN = get_neighbors, edges = edges, column1 = column1, column2 = column2) )
+}
+
+get_neighbors <- function(node, edges, column1, column2){
+  edges <- copy(edges)
+  setnames(edges, c(column1, column2), c("col1", "col2"))
+  neighbors <- list(unique(edges[col1 == node, col2]))
+  return(data.table(node = node, neighbors = neighbors))
+}
+ 
+
+```
+
