@@ -1,0 +1,134 @@
+---
+title: "TBRU Simple Pathway Analysis Exploration"
+output: html_document
+updated: "2023-05-23"
+started: "2023-05-23"
+---
+
+```{r, Dependencies}
+library (data.table)
+#library (ComplexHeatmap)
+#library (ggplot2)
+source("..\\Helper_R_Scripts\\shortestPathFunctions.R")
+
+
+source("..\\Helper_R_Scripts\\ManageScriptData.R")
+WriteSessionInfo()
+WriteInstalledPackages()
+```
+
+
+```{r, Import Data}
+
+# you may need to change file locations for your computer/working directory
+getwd()
+
+
+npout <- fread("..\\Input_Data\\MehdiNP_outputs_nonorm.txt") # x0 is input heat, xss_t is propagated heat
+npin <- fread("..\\Input_Data\\MehdiNP_inputs.txt")
+
+stringNet <- fread("https://stringdb-static.org/download/protein.links.detailed.v11.5/9606.protein.links.detailed.v11.5.txt.gz")
+stringNet <- stringNet[combined_score >= 600]
+
+aliases <- fread("https://stringdb-static.org/download/protein.aliases.v11.5/9606.protein.aliases.v11.5.txt.gz")
+setnames(aliases, "#string_protein_id", "stringID")
+
+load("..\\..\\TBRU_integration_data/data_clean/Cox_model/Cox_NG_screen_model.RData")
+load("..\\..\\TBRU_integration_data/data_clean/Cox_model/Cox_AWR_screen_model.RData")
+# convert to human homologs !!!!
+
+
+
+tbPPI <- fread("..\\Input_Data\\TBsecretedAPMS_NIHMS1503192-supplement-5.csv")
+setnames(tbPPI, c("Bacterial Bait  (Locus ID)", "Human Protein Uniprot", "Human Gene name"), c("Bait", "Prey", "GeneName")) 
+
+```
+
+
+```{r, map mouse crispr data to human}
+mouseUPIDmap <- fread("C:\\Users\\isido\\OneDrive\\Documents\\Krogan Lab Code\\Universal_Datasets\\Species_to_species\\Mouse-Human\\MouseUPIDS2Symbols.csv")
+mouseUPIDmap[, MouseSymbol := toupper(mouseUPIDmap$MouseSymbol)]
+mouseHumanUPIDmap <- fread("C:\\Users\\isido\\OneDrive\\Documents\\Krogan Lab Code\\Universal_Datasets\\Species_to_species\\Mouse-Human\\ToHumanUPIDs_FromMouseUPIDs.csv")
+humanUPIDmap <- fread("C:\\Users\\isido\\OneDrive\\Documents\\Krogan Lab Code\\Universal_Datasets\\Species_to_species\\Mouse-Human\\humanSymbol-uniprotQueryResults.tsv")
+
+log2fct <- 1
+fdrt <- 0.05
+
+awrKDs <- data.table(awr_cox)[abs(log2FC) >= log2fct & FDR <= fdrt, .(symbol, log2FC), by = contrast]
+ngKDs <- data.table(ng_cox)[abs(log2FC) >= log2fct & FDR <= fdrt, .(symbol, log2FC), by = contrast]
+
+unmappedUpCrisprKDs <- awrKDs[!awrKDs$symbol %in%  mouseUPIDmap$MouseSymbol,]     # all from awr experiment
+
+#map upids
+awrKDs[mouseUPIDmap, mouseUPID := i.mouseUPID, on = .(symbol = MouseSymbol)]
+ngKDs[mouseUPIDmap, mouseUPID := i.mouseUPID, on = .(symbol = MouseSymbol)]
+
+#map human upids
+awrKDs[mouseHumanUPIDmap, huUPID := i.To, on = .(mouseUPID = From)]
+ngKDs[mouseHumanUPIDmap, huUPID := i.To, on = .(mouseUPID = From)]
+
+#map human symbols
+awrKDs[humanUPIDmap, huSymbol := i.From, on = .(huUPID = To)]
+ngKDs[humanUPIDmap, huSymbol := i.From, on = .(huUPID = To)]
+
+```
+
+
+```{r, Format Data}
+
+tbPPI <- tbPPI[ MIST >= 0.7, ]
+
+
+npout <- npout[pval < 0.05]
+npout[aliases[alias %in% npout$nodes,], string := i.stringID, on = .(nodes = alias)]
+awrKDs[aliases[alias %in% awrKDs$huSymbol,], string := i.stringID, on = .(huSymbol = alias)]
+ngKDs[aliases[alias %in% ngKDs$huSymbol,], string := i.stringID, on = .(huSymbol = alias)]
+tbPPI[aliases[alias %in% tbPPI$Prey,], string := i.stringID, on = .(Prey = alias)]
+
+
+allsymbols <- rbind(npout[, .(string, symbol = nodes)], awrKDs[, .(string, symbol = huSymbol)], ngKDs[, .(string, symbol = huSymbol)], tbPPI[, .(string, symbol = GeneName)])
+
+allKDs <- c(ngKDs[!is.na(string) & !is.na(huSymbol), string], 
+            awrKDs[!is.na(string)& !is.na(huSymbol) & huSymbol != "SLFN5", string])
+
+shortlist <- c(npout$string, allKDs, tbPPI$string)
+net <- stringNet[ protein1 %in% shortlist & protein2 %in% shortlist]
+# shrinks string network with 20,000 nodes and 800,000 edges (w/ score > 600) to 5000 nodes and 180,000 edges
+```
+
+
+``` {r, igraphification}
+
+library(igraph)
+
+graph <- igraph::graph_from_edgelist(as.matrix(net[, .(protein1, protein2)]))
+distances <- igraph::distances(graph)
+
+```
+
+
+```{r, Crunch ppi -> closest KD}
+
+vsAllKD.paths <- find_ShortestPaths(allKDs, tbPPI[string %in% rownames(distances), string], graph, distances)
+vsAllKD.info <- gen_NodeInfo(vsAllKD.paths)
+vsAllKD.sim <- gen_RandomShortestPaths(length(allKDs), length(tbPPI[string %in% rownames(distances), string]), 1000, distances, graph)
+vsAllKD.info <- normalize_ShortestPaths(vsAllKD.sim, vsAllKD.info)
+
+```
+
+
+```{r, enrichment}
+
+gg <- vsAllKD.info[, .(symbol, source)]
+gg <- rbind(gg, vsAllKD.info[source == "both", .(symbol, source = "crispr")],  vsAllKD.info[source == "both", .(symbol, source = "ppi")])
+
+vsAllKD.gg <- prepare_subnetworkForEnrichment(gg, "symbol", "source")
+
+
+
+```
+
+
+
+
+

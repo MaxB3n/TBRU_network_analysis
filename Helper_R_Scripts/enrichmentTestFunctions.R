@@ -9,7 +9,7 @@ library (data.table)
 #' @param numProcessors integer. Values > 1 enable multiprocessing
 
 enricherOnGroups <- function(groupTable, geneColumn = "gene", groupColumns = c("group"),
-                           term2gene.gmt = NULL, universe = NULL, numProcessors = 1, 
+                           term2gene.gmt = NULL, universe = NULL, 
                            ...){
   
   if (is.null(term2gene.gmt)){
@@ -24,10 +24,11 @@ enricherOnGroups <- function(groupTable, geneColumn = "gene", groupColumns = c("
   
   message ("Computing enrichments on ", length(subTables), " groups defined by ", paste0(groupColumns, collapse = ","))
   
+  numCores <- round(parallel::detectCores() * .70)
+  
   if (Sys.info()["sysname"] == "Windows"){
     message ("Preparing Multithreaded Process")
     # Prepare the Clustering
-    numCores <- round(parallel::detectCores() * .70)
     cl <- makeCluster(numCores) 
     registerDoParallel(cl)
     # export necessary functions/methods to each node
@@ -57,7 +58,7 @@ enricherOnGroups <- function(groupTable, geneColumn = "gene", groupColumns = c("
                                                                                      qvalueCutoff = 1.1,
                                                                                      pvalueCutoff = 1.1,
                                                                                      ...)))
-                                     }, cl=numProcessors)
+                                     }, cl=numCores)
   }
   
   
