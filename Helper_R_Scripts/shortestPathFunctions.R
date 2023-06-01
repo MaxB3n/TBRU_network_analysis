@@ -90,6 +90,10 @@ gen_RandomShortestPaths <- function(nstarts, ntargets, niter, distances, graph){
   return(do.call(rbind, simulated))
 }
 
+normalizeToNetwork <- function(){
+  
+}
+
 ### THESE PVALUE FUNCTIONS ARE ALL MESSED UP
 calcPval <- function(value, dist, cond = "greater"){
   if (cond == "greater"){
@@ -121,75 +125,91 @@ imputeToMin <- function(vect, includeZeros = T){
 }
 
 
-normalize_ShortestPaths <- function(simulatedInfo, testInfo, keycol = "string"){
+normalize_ShortestPaths <- function(simulatedInfo, testInfo, useSim = TRUE, keycol = "string"){
   
-  meanSimulatedInfo <- copy(simulatedInfo)
-  meanSimulatedInfo[, betweenness := imputeToMin(betweenness)]
-  meanSimulatedInfo <- meanSimulatedInfo[,.(betwn = mean(betweenness), degree = mean(degree), eigen = mean(eigen), reach = mean(reach), npaths = mean(npaths)), by = string]
-  meanSimulatedInfo <- meanSimulatedInfo[ meanSimulatedInfo[[keycol]] %in% testInfo[[keycol]] ]
-  
-  testInfo[, c("normBetwn", "normDegree", "normEigen", "normReach", "normPaths") := .(betweenness/meanSimulatedInfo$betwn, degree/meanSimulatedInfo$degree, eigen/meanSimulatedInfo$eigen, reach/meanSimulatedInfo$reach, npaths/meanSimulatedInfo$npaths)]
-  
-  #pvals <- do.call(cbind, lapply( c("betweenness", "degree", "eigen", "reach", "npaths"), FUN = function(measureCol){
-  #  pvalCol <- data.table( applyPval(measureCol, testInfo, simulatedInfo, keycol = keycol))
-  #  setnames(pvalCol, "V1", paste0(measureCol, "_pval"))
-  #  return(pvalCol)
-  #}))
-  
-  #testInfo <- cbind(testInfo, pvals)
-  return(testInfo)
+  if (useSim){
+    meanSimulatedInfo <- copy(simulatedInfo)
+    meanSimulatedInfo[, betweenness := imputeToMin(betweenness)]
+    meanSimulatedInfo <- meanSimulatedInfo[,.(betwn = mean(betweenness), degree = mean(degree), eigen = mean(eigen), reach = mean(reach), npaths = mean(npaths)), by = string]
+    meanSimulatedInfo <- meanSimulatedInfo[ meanSimulatedInfo[[keycol]] %in% testInfo[[keycol]] ]
+    
+    testInfo[, c("normBetwn", "normDegree", "normEigen", "normReach", "normPaths") := .(betweenness/meanSimulatedInfo$betwn, degree/meanSimulatedInfo$degree, eigen/meanSimulatedInfo$eigen, reach/meanSimulatedInfo$reach, npaths/meanSimulatedInfo$npaths)]
+    
+    #pvals <- do.call(cbind, lapply( c("betweenness", "degree", "eigen", "reach", "npaths"), FUN = function(measureCol){
+    #  pvalCol <- data.table( applyPval(measureCol, testInfo, simulatedInfo, keycol = keycol))
+    #  setnames(pvalCol, "V1", paste0(measureCol, "_pval"))
+    #  return(pvalCol)
+    #}))
+    
+    #testInfo <- cbind(testInfo, pvals)
+    return(testInfo)
+  } else {
+    
+  }
 }
 
 
-prepare_subnetworkForEnrichment <- function(geneGroups, geneColName, groupColname, geneLabel = "symbol", subnet = "Proteome", reassign = FALSE){
+shortenChar <- function(stringVect, numchar=60){
+ return( lapply(stringVect, function(string){
+    if (nchar(string) < numchar) {
+      return(string)
+    } else {
+      return(string[1:numchar])
+    }
+  }) )
+}
+
+
+prepare_subnetworkForEnrichment <- function(geneGroups, geneColName, groupColName, geneLabel = "symbol", subnet = "Proteome", reassign = FALSE){
   
+  setnames(geneGroups, c(geneColName, groupColName), c("Protein", "Group"))
+  groups <- geneGroups
   # Prepare gene groups
-  humanUPIDmap <- fread("..\\Input_Data\\enrichment\\humanSymbol-uniprotQueryResults.tsv")
+#  humanUPIDmap <- fread("..\\Input_Data\\enrichment\\humanSymbol-uniprotQueryResults.tsv")
   
-  
-  if (sum(geneGroups[[geneColName]] %in% humanUPIDmap$To) < sum(geneGroups[[geneColName]] %in% humanUPIDmap$From)){
-    setnames(geneGroups, c(geneColName, groupColName), c("Protein", "Group"))
-    
-    uniprotGroups <- copy(geneGroups)
-    uniprotGroups[humanUPIDmap, upid := i.To, on = .(Protein = From)] [, Protein := NULL]
-    setnames(uniprotGroups, c("upid"), c("Protein"))
-    
-    groups <- list("gene" = geneGroups, "uniprot" = uniprotGroups) 
-  } else {
-    setnames(geneGroups, c(geneColName, groupColName), c("Protein", "Group"))
-    
-    symbolGroups <- copy(geneGroups)
-    symbolGroups[humanUPIDmap, symbol := i.From, on = .(Protein = To)] [, Protein := NULL]
-    setnames(symbolGroups, c("symbol"), c("Protein"))
-    
-    groups <- list("gene" = symbolGroups, "uniprot" = geneGroups)
-  }
+#  
+#  if (sum(geneGroups[[geneColName]] %in% humanUPIDmap$To) < sum(geneGroups[[geneColName]] %in% humanUPIDmap$From)){
+#    setnames(geneGroups, c(geneColName, groupColName), c("Protein", "Group"))
+#    
+#    uniprotGroups <- copy(geneGroups)
+#    uniprotGroups[humanUPIDmap, upid := i.To, on = .(Protein = From)] [, Protein := NULL]
+#    setnames(uniprotGroups, c("upid"), c("Protein"))
+#    
+#    groups <- list("gene" = geneGroups, "uniprot" = uniprotGroups) 
+#  } else {
+#    setnames(geneGroups, c(geneColName, groupColName), c("Protein", "Group"))
+#    symbolGroups <- copy(geneGroups)
+#   symbolGroups[humanUPIDmap, symbol := i.From, on = .(Protein = To)] [, Protein := NULL]
+#    setnames(symbolGroups, c("symbol"), c("Protein"))
+#    
+#    groups <- list("gene" = symbolGroups, "uniprot" = geneGroups)
+#  }
   
   
   # Load default gene universe
   if (!exists("unv") | reassign == T){
-    if (subnet == "MehdiNP"){
-      stringMap <-fread( "..\\Input_Data\\enrichment\\netprop_STRING-UNIPROT.tsv") [, `Gene Names` := tstrsplit(`Gene Names`, split = ";| " , keep = 1)]
-      uniprot <- stringMap[ From %in% unique(net$protein1), Entry]
-      gene <- stringMap[ From %in% unique(net$protein1), `Gene Names`]
-      unv <<- list("uniprot" = uniprot, "gene" = gene)
-    }
-    if (subnet == "Proteome"){
-      stringMap <-fread( "..\\Input_Data\\enrichment\\humanProteome_STRING-UNIPROT.tsv") [, `Gene Names` := tstrsplit(`Gene Names`, split = ";| " , keep = 1)]
-      uniprot <- stringMap[ From %in% unique(net$protein1), Entry]
-      gene <- stringMap[ From %in% unique(net$protein1), `Gene Names`]
-      unv <<- list("uniprot" = uniprot, "gene" = gene)
-    }
+      stringMap <-fread( "..\\Input_Data\\mapping\\swissprot-STRING.csv.gz") #[, `Gene Names` := tstrsplit(`Gene Names`, split = ";| " , keep = 1)]
+      ref <- unique(net$protein1)
+      unv <<- stringMap[ From %in% ref, From]
   }
-
+  
   # Load gene sets
   if (!exists("gmt") | reassign == T){
-  kegg <- fread("..\\Input_Data\\enrichment\\KEGGgmt.csv.gz"))
-  go <- fread("..\\Input_Data\\enrichment\\GOgmt.csv.gz"))
-  c2 <- fread("..\\Input_Data\\enrichment\\GSEA.C2gmt.csv.gz"))
-  ipa <- fread("..\\Input_Data\\enrichment\\IPAgmt.csv.gz"))
-  ipap <- fread("..\\Input_Data\\enrichment\\IPA_pathways_KEGG_MSigDBgmt.csv.gz"))
-  gmt <<- list("kegg" = kegg, "go" = go, "c2" = c2, "ipa" = ipa, "ipap" = ipap)
+    
+    if (!exists("aliases")){
+      aliases <- fread("https://stringdb-static.org/download/protein.aliases.v11.5/9606.protein.aliases.v11.5.txt.gz")
+      setnames(aliases, "#string_protein_id", "stringID")
+    }
+    kegg <- fread("..\\Input_Data\\enrichment\\KEGGgmt.csv.gz")[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
+    go <- fread("..\\Input_Data\\enrichment\\GOgmt.csv.gz")[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
+    c2 <- fread("..\\Input_Data\\enrichment\\GSEA.C2gmt.csv.gz")[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
+    ipa <- fread("..\\Input_Data\\enrichment\\IPAgmt.csv.gz")[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
+    ipap <- fread("..\\Input_Data\\enrichment\\IPA_pathways_KEGG_MSigDBgmt.csv.gz")[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
+    
+    gmt <<- lapply( list("kegg" = kegg, "go" = go, "c2" = c2, "ipa" = ipa, "ipap" = ipap) , FUN = function(db){
+      setnames(db, "string", "gene")
+      return(db)
+    })
   }
   
   return(groups)
@@ -210,13 +230,8 @@ calculate_subnetworkEnrichment <- function(groups, proteinUnv = NULL, additional
   if (!exists("gmt") | !exists("unv")){ stop("No gmt or unv data structures found in environment, try running prepare_subnetworkForEnrichment() or supply in optional arguments") }
   
   enrichments <- lapply(names(gmt), function(db, groups, unvs){
-    if (db %in% c("go", "kegg", "c2")){
-      univ <- unvs[["uniprot"]]
-      gg <- groups [["uniprot"]]
-    } else{ 
-      univ <- unvs[["gene"]]
-      gg <- groups [["gene"]]
-    }
+      univ <- unvs
+      gg <- groups
     return( enricherOnGroups(groupTable = gg, geneColumn = "Protein", groupColumns = c("Group"), term2gene.gmt = gmt[[db]], universe = univ))
   }, groups = groups, unvs = unv )
   names(enrichments) <- names(gmt)
@@ -250,8 +265,33 @@ plot_subnetworkEnrichments <- function(enrichments, genesets = NULL, topn = 2, s
   
   lapply(genesets, FUN = function(en){
     tryCatch( enrichmentNicelyFormatted(enrichments[[en]], topn = topn, name, en, save = save, subDir = subd), error=function(e) NULL)
+  })
+  
+}
+
+
+sharedGenes_Helper <- function(genesets){
+  
+  sharedset <- genesets[1][[1]][ genesets[1][[1]] %in% genesets[2][[1]]]
+  
+  if (length(genesets) > 2){
+  sharedGenes_Helper( c(list(sharedset), genesets[3:length(genesets)]) )
+  } else {
+    return(sharedset)
   }
   
 }
 
 
+sharedGenes_BetwAnnotations <- function(en, group, annotations, showall = F){
+  
+  genesets <- lapply(annotations, FUN = function(ant){
+   return( strsplit( en[ toupper(ID) == toupper(ant) & Group == group, geneID],  split = "/")[[1]] )
+  })
+  
+  if (showall){
+    return(unique(unlist(genesets)))
+  } else {
+    return(sharedGenes_Helper(genesets))
+  }
+}
