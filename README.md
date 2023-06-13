@@ -8,12 +8,16 @@ Starting in a subnetwork of STRING limited to significant proteins from network 
 Crispr KO/KD data taken from [TBRU_integration_data](https://github.com/hawn-lab/TBRU_integration_data/tree/main/data_clean).
 
 **Ideas To Implement**
-- Limit STRING Network to experimentally validated physical interactions
-- Change normalization method (dividing instead of subtracting)
-- Calc pvalues for each centrality score
+- ~~Limit STRING Network to experimentally validated physical interactions~~
+- ~~Change normalization method (dividing instead of subtracting)~~
+- ~~Calc pvalues for each centrality score~~
 - Track which data's network propagation each protein in the network was added from, and then enrich paths for clinical data types.
 - Find dsd modules and enrich
 - Complete suite of visualization, centrality hits, enrichment, modularization for ppi -> all KO and ppi -> each KO as well as ko to ppi
+-  
+- Compare Networks by generating S matrix for each and finding genes w greatest difference then doing gene enrichment (dor for allkd vs eachkd)
+- Re-Run analysis for multiple underlying networks--look at https://pubmed.ncbi.nlm.nih.gov/29605183/ Evaluation of molecular networks (Huang et al 2018)
+-
 
 ### Future Approaches - Add TB Baits to Network
 - Add TB baits; use this to find tb secreted factors likely responsible for development of meningitis from SNPS and patient data. Also explore enrichment for functions within shortest paths to/from interactors of individual baits.

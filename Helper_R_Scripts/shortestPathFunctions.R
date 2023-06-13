@@ -95,7 +95,12 @@ normalizeToNetwork <- function(){
 }
 
 ### THESE PVALUE FUNCTIONS ARE ALL MESSED UP
-calcPval <- function(value, dist, cond = "greater"){
+calcPval <- function(value, dist, cond = "greater", background = NULL){
+  if (!is.null(background)){
+    zeros <- background - length(dist)
+    dist <- c(dist, rep(0, zeros))
+  }
+  
   if (cond == "greater"){
     dist <- as.numeric(dist)
     pv <- (length(dist[dist > value]) + 1 ) / (length(dist)+1)
@@ -105,9 +110,9 @@ calcPval <- function(value, dist, cond = "greater"){
 
 
 applyPval <- function(valuecol, applyTo, background, keycol = "string"){
-  #p.adjust
+  #maybe incl p.adjust?
   pvals <- lapply(applyTo[[keycol]], FUN = function(key){
-    return(calcPval( applyTo[ applyTo[[keycol]] == key, valuecol, with = F ], as.numeric(background[ background[[keycol]] == key, valuecol, with = F])))
+    return(calcPval( applyTo[ applyTo[[keycol]] == key, ][[valuecol]], as.numeric(background[ background[[keycol]] == key, ][[valuecol]]), background = 1000) )
   } )
   return(pvals)
 }
@@ -135,13 +140,13 @@ normalize_ShortestPaths <- function(simulatedInfo, testInfo, useSim = TRUE, keyc
     
     testInfo[, c("normBetwn", "normDegree", "normEigen", "normReach", "normPaths") := .(betweenness/meanSimulatedInfo$betwn, degree/meanSimulatedInfo$degree, eigen/meanSimulatedInfo$eigen, reach/meanSimulatedInfo$reach, npaths/meanSimulatedInfo$npaths)]
     
-    #pvals <- do.call(cbind, lapply( c("betweenness", "degree", "eigen", "reach", "npaths"), FUN = function(measureCol){
-    #  pvalCol <- data.table( applyPval(measureCol, testInfo, simulatedInfo, keycol = keycol))
-    #  setnames(pvalCol, "V1", paste0(measureCol, "_pval"))
-    #  return(pvalCol)
-    #}))
+    pvals <- do.call(cbind, lapply( c("betweenness", "degree", "eigen", "reach", "npaths"), FUN = function(measureCol){
+      pvalCol <- data.table( applyPval(measureCol, testInfo, simulatedInfo, keycol = keycol))
+      setnames(pvalCol, "V1", paste0(measureCol, "_pval"))
+      return(pvalCol)
+    }))
     
-    #testInfo <- cbind(testInfo, pvals)
+    testInfo <- cbind(testInfo, pvals)
     return(testInfo)
   } else {
     
@@ -245,26 +250,26 @@ substrRight <- function(x,n){
 }
 
 
-enrichmentNicelyFormatted <- function(enrichment , topn = 2, dataSrc = "", groupSrc = "", otherAnt = "", save = FALSE, subDir = "", ...){
+enrichmentNicelyFormatted <- function(enrichment , topn = 2, dataSrc = "", groupSrc = "", otherAnt = "", save = FALSE, subDir = "", dims = NULL, ...){
   title <- paste(dataSrc, groupSrc)
   hminfo <- enrichHeatmapBestPerGroup(enrichment, NULL, groupColumn = "Group", topN = topn, max_pAdjust = 0.05, cluster_columns = FALSE, title = title, ...)
-  
+
   if (save){
     Prefix = paste(dataSrc, groupSrc, "enrichmentHeatmap", paste0("topn=",topn), sep = "_")
-    BackupAsPDF(hminfo, prefix  = Prefix, subDir = subDir )
+    BackupAsPDF(hminfo, prefix  = Prefix, subDir = subDir, dimensions = dims )
   }
   return(hminfo)
 }
 
 
-plot_subnetworkEnrichments <- function(enrichments, genesets = NULL, topn = 2, save = F, name = "", subd = ""){
+plot_subnetworkEnrichments <- function(enrichments, genesets = NULL, topn = 2, save = F, name = "", subd = "", dims = NULL){
   
   if (is.null(genesets)){
     genesets <- names(enrichments)
   }
   
   lapply(genesets, FUN = function(en){
-    tryCatch( enrichmentNicelyFormatted(enrichments[[en]], topn = topn, name, en, save = save, subDir = subd), error=function(e) NULL)
+    tryCatch( enrichmentNicelyFormatted(enrichments[[en]], topn = topn, name, en, save = save, subDir = subd, dims = dims), error=function(e) NULL)
   })
   
 }

@@ -74,6 +74,16 @@ ngKDs[mouseHumanUPIDmap, huUPID := i.To, on = .(mouseUPID = From)]
 awrKDs[humanUPIDmap, huSymbol := `i.Entry Name`, on = .(huUPID = Entry)] [,huSymbol := gsub("_HUMAN", "", huSymbol)]
 ngKDs[humanUPIDmap, huSymbol := `i.Entry Name`, on = .(huUPID = Entry)] [,huSymbol := gsub("_HUMAN", "", huSymbol)]
 
+#### TRY MAPPING HOMOLOGS Better
+library(orthogene)
+mappedKDs <- data.table(orthogene::convert_orthologs(rbind(awrKDs, ngKDs), 
+                                        gene_input = "symbol",
+                                        gene_output = "columns",
+                                        input_species = "mouse",
+                                        output_species = "human",
+                                        non121_strategy = "keep_popular") )
+
+
 ```
 
 
@@ -84,24 +94,25 @@ tbPPI <- tbPPI[ MIST >= 0.7, ]
 
 npout <- npout[pval < 0.05]
 npout[aliases[alias %in% npout$nodes,], string := i.stringID, on = .(nodes = alias)]
-awrKDs[aliases[alias %in% awrKDs$huSymbol,], string := i.stringID, on = .(huSymbol = alias)]
-ngKDs[aliases[alias %in% ngKDs$huSymbol,], string := i.stringID, on = .(huSymbol = alias)]
+mappedKDs[aliases[alias %in% mappedKDs$ortholog_gene,], string := i.stringID, on = .(ortholog_gene = alias)]
 tbPPI[aliases[alias %in% tbPPI$Prey,], string := i.stringID, on = .(Prey = alias)]
 
 
-allsymbols <- rbind(npout[, .(string, symbol = nodes)], awrKDs[, .(string, symbol = huSymbol)], ngKDs[, .(string, symbol = huSymbol)], tbPPI[, .(string, symbol = GeneName)])
+allsymbols <- rbind(npout[, .(string, symbol = nodes)], mappedKDs[, .(string, symbol = ortholog_gene)], tbPPI[, .(string, symbol = GeneName)])
+allstrings <- c(npout$string, mappedKDs$string, tbPPI$string)
+
+
 
 allKDs <- c(ngKDs[!is.na(string) & !is.na(huSymbol), string], 
             awrKDs[!is.na(string)& !is.na(huSymbol) & huSymbol != "SLFN5", string])
 
-shortlist <- c(npout$string, allKDs, tbPPI$string)
 net <- stringSub[ protein1 %in% shortlist & protein2 %in% shortlist]
 # shrinks string network with 20,000 nodes and 800,000 edges (w/ score > 600) to 5000 nodes and 180,000 edges
 ```
 
 
 ``` {r, igraphification}
-
+`
 library(igraph)
 
 graph <- igraph::graph_from_edgelist(as.matrix(net[, .(protein1, protein2)]))
@@ -112,17 +123,17 @@ distances <- igraph::distances(graph)
 
 ```{r, Crunch ppi -> closest KD}
 
-vsAllKD.paths <- find_ShortestPaths(tbPPI[string %in% rownames(distances), string], allKDs[allKDs %in% rownames(distances)], graph, distances)
+vsAllKD.paths <- find_ShortestPaths(tbPPI[string %in% rownames(distances), string], mappedKDs[string %in% rownames(distances), string], graph, distances)
 vsAllKD.info <- gen_NodeInfo(vsAllKD.paths)
-vsAllKD.sim <- gen_RandomShortestPaths(length(allKDs), length(tbPPI[string %in% rownames(distances), string]), 1000, distances, graph)
+vsAllKD.sim <- gen_RandomShortestPaths(nrow(mappedKDs), length(tbPPI[string %in% rownames(distances), string]), 1000, distances, graph)
 vsAllKD.info <- normalize_ShortestPaths(vsAllKD.sim, vsAllKD.info)
 
-vsAllKD.info [, source := "inpath"] [string %in% allKDs, source := "crispr"] [string %in% tbPPI$string, source := "ppi"]  [string %in% tbPPI$string & string %in% allKDs, source := "both"] 
+vsAllKD.info [, source := "inpath"] [string %in% mappedKDs$string, source := "crispr"] [string %in% tbPPI$string, source := "ppi"]  [string %in% tbPPI$string & string %in% mappedKDs$string, source := "both"] 
 vsAllKD.info [allsymbols, symbol := i.symbol, on = .(string)] [, symbol := tstrsplit(symbol, split = ";| " , keep = 1)]
 ```
 
 
-```{r, enrichment}
+```{r, ppi -> closest KD enrichment}
 
 gg <- vsAllKD.info[, .(string, source)]
 gg <- rbind(gg, vsAllKD.info[source == "both", .(string, source = "crispr")],  vsAllKD.info[source == "both", .(string, source = "ppi")])
@@ -132,7 +143,6 @@ vsAllKD.en <- calculate_subnetworkEnrichment(vsAllKD.gg)
 
 # PLOT ALL Enrichments
 plot_subnetworkEnrichments(vsAllKD.en, topn = 5, save = T)
-getwd()
 
 
 sum(vsAllKD.en$ipap$ID %in% testSet)
@@ -149,6 +159,7 @@ sharedGenes_BetwAnnotations(vsAllKD.en$ipap, "inpath", enrichedSet)
 
 ```
 
+
 ```{r, cytoscape}
 
 vsAllKD.paths$edgemat <- matrix(vsAllKD.paths$edges, ncol = 2, byrow = T)
@@ -157,6 +168,84 @@ vsAllKD.graph <- simplify(igraph::graph_from_edgelist(vsAllKD.paths$edgemat) )
 library(RCy3)
 createNetworkFromIgraph(vsAllKD.graph)
 loadTableData(vsAllKD.info, data.key.column = "string", table = "node")
+
+```
+
+
+```{r, Separate KD Phenotypes}
+
+mappedKDs[, contrast := gsub("-unsorted", "", gsub("TNFpos_","", contrast))]
+
+vsEach.structure <- lapply (unique(mappedKDs$contrast), function(conName){
+  
+  assign(paste0("vs",conName,".paths"), 
+         find_ShortestPaths(tbPPI[string %in% rownames(distances), string], mappedKDs[contrast == conName & string %in% rownames(distances), string], graph, distances),
+         envir = globalenv())
+  
+  assign(paste0("vs",conName,".info"), gen_NodeInfo(get(paste0("vs",conName,".paths"))), envir = globalenv())
+  
+  assign(paste0("vs",conName,".sim"),  gen_RandomShortestPaths(nrow(mappedKDs[contrast == conName]), length(tbPPI[string %in% rownames(distances), string]), 1000, distances, graph), envir = globalenv())
+         
+  assign(paste0("vs",conName,".info"), normalize_ShortestPaths(get(paste0("vs",conName,".sim")), get(paste0("vs",conName,".info"))), envir = globalenv())
+  
+  get(paste0("vs",conName,".info")) [, source := "inpath"] [string %in% mappedKDs$string, source := "crispr"] [string %in% tbPPI$string, source := "ppi"]  [string %in% tbPPI$string & string %in% allKDs, source := "both"] [allsymbols, symbol := i.symbol, on = .(string)] [, symbol := tstrsplit(symbol, split = ";| " , keep = 1)]  [, contrast := conName]
+  
+  return( matrix(get(paste0("vs",conName,".paths"))$edges, ncol = 2, byrow = T) )
+})
+
+
+vsEach.edgemat <- do.call(rbind,vsEach.structure)
+vsEach.nodes <- unique(as.character(vsEach.edgemat))
+temp.graph <- simplify(igraph::graph_from_edgelist(vsEach.edgemat) )
+vsEach.info <- data.table(string = vsEach.nodes, betweenness = igraph::betweenness(temp.graph), degree = igraph::degree(temp.graph), eigen = igraph::evcent(temp.graph)$vector, reach = (ego_size(temp.graph, 2)-1)/(vcount(temp.graph)-1))
+vsEach.info[data.table(as.character(vsEach.edgemat))[, .N, by = V1], npaths := i.N, on = .(string = V1)] 
+vsEach.info <- normalize_ShortestPaths(vsAllKD.sim, vsEach.info)
+
+vsAllKD.info [, source := "inpath"] [string %in% mappedKDs$string, source := "crispr"] [string %in% tbPPI$string, source := "ppi"]  [string %in% tbPPI$string & string %in% allKDs, source := "both"] 
+vsAllKD.info [allsymbols, symbol := i.symbol, on = .(string)] [, symbol := tstrsplit(symbol, split = ";| " , keep = 1)]
+
+
+
+```
+
+
+```{r, enrichment for vsEach/vsContrast}
+
+vsContrast.info <- do.call(rbind, list(vslow_IFNB.info, vshigh_IFNB.info, vsiNOSpos.info, vsiNOSneg.info))
+
+gg2 <- vsContrast.info[, .(string, source, contrast)]
+gg2 <- rbind(gg, vsContrast.info[source == "both", .(string, source = "crispr", contrast)],  vsContrast.info[source == "both", .(string, source = "ppi", contrast)])
+gg2[, group := paste0(contrast, "_", source)] [, source := NULL] [, contrast := NULL]
+gg2 <- gg2[!grepl("both",gg2$group), ]
+
+# Optional
+#gg2 <- gg2[grepl("inpath", gg2$Group)]
+
+vsContrast.gg <- prepare_subnetworkForEnrichment(gg2, "string", "group", subnet = "MehdiNP", reassign = T)
+vsContrast.en <- calculate_subnetworkEnrichment(vsContrast.gg)
+
+# PLOT ALL Enrichments
+plot_subnetworkEnrichments(vsContrast.en, topn = 4, save = T, dims = c(14,8))
+
+
+```
+
+
+```{r, crunch All KD -> TB PPI}
+
+vsAllPPI.paths <- find_ShortestPaths(mappedKDs[string %in% rownames(distances), string], tbPPI[string %in% rownames(distances), string], graph, distances)
+vsAllPPI.info <- gen_NodeInfo(vsAllPPI.paths)
+vsAllPPI.sim <- gen_RandomShortestPaths(nrow(mappedKDs), length(tbPPI[string %in% rownames(distances), string]), 1000, distances, graph)
+vsAllPPI.info <- normalize_ShortestPaths(vsAllPPI.sim, vsAllPPI.info)
+
+vsAllPPI.info [, source := "inpath"] [string %in% mappedKDs$string, source := "crispr"] [string %in% tbPPI$string, source := "ppi"]  [string %in% tbPPI$string & string %in% mappedKDs$string, source := "both"] 
+vsAllPPI.info [allsymbols, symbol := i.symbol, on = .(string)] [, symbol := tstrsplit(symbol, split = ";| " , keep = 1)]
+
+vsAllPPI.info [npout, netPropOrigin := i.dataset, on = .(string = string)]
+
+
+
+
 
 ```
 
