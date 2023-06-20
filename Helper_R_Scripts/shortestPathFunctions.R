@@ -262,14 +262,14 @@ enrichmentNicelyFormatted <- function(enrichment , topn = 2, dataSrc = "", group
 }
 
 
-plot_subnetworkEnrichments <- function(enrichments, genesets = NULL, topn = 2, save = F, name = "", subd = "", dims = NULL){
+plot_subnetworkEnrichments <- function(enrichments, genesets = NULL, topn = 2, save = F, name = "", subd = "", dims = NULL, ...){
   
   if (is.null(genesets)){
     genesets <- names(enrichments)
   }
   
   lapply(genesets, FUN = function(en){
-    tryCatch( enrichmentNicelyFormatted(enrichments[[en]], topn = topn, name, en, save = save, subDir = subd, dims = dims), error=function(e) NULL)
+    tryCatch( enrichmentNicelyFormatted(enrichments[[en]], topn = topn, name, en, save = save, subDir = subd, dims = dims, ...), error=function(e) NULL)
   })
   
 }

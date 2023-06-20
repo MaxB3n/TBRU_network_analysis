@@ -112,7 +112,7 @@ net <- stringSub[ protein1 %in% shortlist & protein2 %in% shortlist]
 
 
 ``` {r, igraphification}
-`
+
 library(igraph)
 
 graph <- igraph::graph_from_edgelist(as.matrix(net[, .(protein1, protein2)]))
@@ -218,14 +218,18 @@ gg2 <- rbind(gg, vsContrast.info[source == "both", .(string, source = "crispr", 
 gg2[, group := paste0(contrast, "_", source)] [, source := NULL] [, contrast := NULL]
 gg2 <- gg2[!grepl("both",gg2$group), ]
 
+gg2 <- rbind(gg2, data.table( string = unique(gg2$string), group = "__all") )
+
 # Optional
 #gg2 <- gg2[grepl("inpath", gg2$Group)]
 
-vsContrast.gg <- prepare_subnetworkForEnrichment(gg2, "string", "group", subnet = "MehdiNP", reassign = T)
+vsContrast.gg <- prepare_subnetworkForEnrichment(gg2, "string", "group", subnet = "MehdiNP", reassign = F)
 vsContrast.en <- calculate_subnetworkEnrichment(vsContrast.gg)
 
 # PLOT ALL Enrichments
-plot_subnetworkEnrichments(vsContrast.en, topn = 4, save = T, dims = c(14,8))
+plot_subnetworkEnrichments(vsContrast.en, topn = 4, save = T,  name = "vs Each KD", 
+                           negCols = unique(vsContrast.gg[grepl("low|neg", vsContrast.gg$Group), Group]), 
+                           column_split = tstrsplit(sort(unique(vsContrast.gg$Group)), "_|O", keep = 3) [[1]] )
 
 
 ```
@@ -244,8 +248,19 @@ vsAllPPI.info [allsymbols, symbol := i.symbol, on = .(string)] [, symbol := tstr
 vsAllPPI.info [npout, netPropOrigin := i.dataset, on = .(string = string)]
 
 
+#### ENRICHMENTs
+
+gg3 <- vsAllPPI.info[, .(string, source)]
+gg3 <- rbind(gg3, vsAllPPI.info[source == "both", .(string, source = "crispr")],  vsAllPPI.info[source == "both", .(string, source = "ppi")])
+gg3 <- gg3[!grepl("both",gg3$source), ]
+gg3 <- rbind(gg3, gg3[, .(string, source = "all")])
 
 
+vsAllPPI.gg <- prepare_subnetworkForEnrichment(gg3, "string", "source", subnet = "MehdiNP", reassign = F)
+vsAllPPI.en <- calculate_subnetworkEnrichment(vsAllPPI.gg)
+
+# PLOT ALL Enrichments
+plot_subnetworkEnrichments(vsAllPPI.en, topn = 5, save = T,  name = "vs All PPI")
 
 ```
 
