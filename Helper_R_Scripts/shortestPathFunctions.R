@@ -14,7 +14,7 @@ library(doParallel)
 library(pbapply)
 source("..\\Helper_R_Scripts\\enrichmentTestFunctions.R")
 
-find_ShortestPaths <- function(startpoints, targets, graph, distances = NULL){    # startpoints and targets are both character vectors of nodes in the graph, graph is an igraph object, distances is a 
+find_ShortestPaths <- function(startpoints, targets, graph, distances = NULL, trackStartEnds = FALSE){    # startpoints and targets are both character vectors of nodes in the graph, graph is an igraph object, distances is a 
                                                                                   # distance matrix of the  
   if (is.null(distances)){
     distances <- igraph::distances(graph)
@@ -27,8 +27,8 @@ find_ShortestPaths <- function(startpoints, targets, graph, distances = NULL){  
   }, candidates = targets, distances = distances)]
   
   paths <- lapply( 1:nrow(closestTarget), FUN = function(i, targets, graph){
-    igraph::shortest_paths( graph, closestTarget[i, interactor], closestTarget[i, knockdown][[1]] )$vpath
-  }, targets = closestTargets, graph = graph)
+    tempPath <- igraph::shortest_paths( graph, closestTarget[i, interactor], closestTarget[i, knockdown][[1]] )$vpath
+    }, targets = closestTargets, graph = graph)
   paths <- unlist(paths, recursive = F)
   
   nodes <- unique(names(unlist(paths)))
@@ -41,7 +41,24 @@ find_ShortestPaths <- function(startpoints, targets, graph, distances = NULL){  
     }, path = path))
   }))
   
-  return(list(paths = paths, nodes = nodes, edges = edges))
+  if (!trackStartEnds){
+    return(list(paths = paths, nodes = nodes, edges = edges))
+  } else{
+    
+    startEnds <- suppressWarnings( do.call(rbind, lapply(paths, FUN = function(p){
+      names <- names(p)
+      len <- length(names)
+      if (len > 2){
+        return(data.table("inpath" = c(NA, names[2:(len-1)]), "start" = names[1], "end" = names[len] ))
+      } else{
+        return(data.table("inpath" = c(NA), "start" = names[1], "end" = names[len] ))
+      }
+    })))
+    
+    startEnds <- startEnds[!is.na(start)]
+      
+    return(list(paths = paths, nodes = nodes, edges = edges, startEnds = startEnds))
+  }
 }
 
 
