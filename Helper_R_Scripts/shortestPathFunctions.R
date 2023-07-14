@@ -12,7 +12,8 @@ library(igraph)
 library(parallel)
 library(doParallel)
 library(pbapply)
-source("..\\Helper_R_Scripts\\enrichmentTestFunctions.R")
+source("C:\\Users\\isido\\github\\TBRU_network_analysis\\Helper_R_Scripts\\enrichmentTestFunctions.R")
+pathToData <- "C:\\Users\\isido\\github\\TBRU_network_analysis\\Input_Data\\enrichment\\"
 
 find_ShortestPaths <- function(startpoints, targets, graph, distances = NULL, trackStartEnds = FALSE){    # startpoints and targets are both character vectors of nodes in the graph, graph is an igraph object, distances is a 
                                                                                   # distance matrix of the  
@@ -26,9 +27,11 @@ find_ShortestPaths <- function(startpoints, targets, graph, distances = NULL, tr
     return (data.table(candidateNodeDistances, names(candidateNodeDistances))[candidateNodeDistances == min(candidateNodeDistances),V2] )
   }, candidates = targets, distances = distances)]
   
+  
   paths <- lapply( 1:nrow(closestTarget), FUN = function(i, targets, graph){
     tempPath <- igraph::shortest_paths( graph, closestTarget[i, interactor], closestTarget[i, knockdown][[1]] )$vpath
     }, targets = closestTargets, graph = graph)
+  print(length(paths))
   paths <- unlist(paths, recursive = F)
   
   nodes <- unique(names(unlist(paths)))
@@ -210,7 +213,7 @@ prepare_subnetworkForEnrichment <- function(geneGroups, geneColName, groupColNam
   
   # Load default gene universe
   if (!exists("unv") | reassign == T){
-      stringMap <-fread( "..\\Input_Data\\mapping\\swissprot-STRING.csv.gz") #[, `Gene Names` := tstrsplit(`Gene Names`, split = ";| " , keep = 1)]
+      stringMap <-fread( paste0(pathToData, "..\\mapping\\swissprot-STRING.csv.gz")) #[, `Gene Names` := tstrsplit(`Gene Names`, split = ";| " , keep = 1)]
       ref <- unique(net$protein1)
       unv <<- stringMap[ From %in% ref, From]
   }
@@ -222,11 +225,16 @@ prepare_subnetworkForEnrichment <- function(geneGroups, geneColName, groupColNam
       aliases <- fread("https://stringdb-static.org/download/protein.aliases.v11.5/9606.protein.aliases.v11.5.txt.gz")
       setnames(aliases, "#string_protein_id", "stringID")
     }
-    kegg <- fread("..\\Input_Data\\enrichment\\KEGGgmt.csv.gz")[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
-    go <- fread("..\\Input_Data\\enrichment\\GOgmt.csv.gz")[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
-    c2 <- fread("..\\Input_Data\\enrichment\\GSEA.C2gmt.csv.gz")[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
-    ipa <- fread("..\\Input_Data\\enrichment\\IPAgmt.csv.gz")[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
-    ipap <- fread("..\\Input_Data\\enrichment\\IPA_pathways_KEGG_MSigDBgmt.csv.gz")[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
+    kegg <- fread(paste0(pathToData, "KEGGgmt.csv.gz"))[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
+    go <- fread(paste0(pathToData, "GOgmt.csv.gz"))[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
+    c2 <- fread(paste0(pathToData, "GSEA.C2gmt.csv.gz"))[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
+    ipa <- fread(paste0(pathToData, "IPAgmt.csv.gz"))[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
+    ipap <- fread(paste0(pathToData, "IPA_pathways_KEGG_MSigDBgmt.csv.gz"))[aliases, string := i.stringID, on = .(gene=alias)] [, gene := NULL]  
+    
+    kegg <- kegg[!is.na(string), .(ont, string)] 
+    go <- go[!is.na(string), .(ont, string) ] 
+    
+    
     
     gmt <<- lapply( list("kegg" = kegg, "go" = go, "c2" = c2, "ipa" = ipa, "ipap" = ipap) , FUN = function(db){
       setnames(db, "string", "gene")

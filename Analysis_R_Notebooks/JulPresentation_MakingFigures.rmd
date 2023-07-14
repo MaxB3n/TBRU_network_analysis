@@ -1,0 +1,45 @@
+---
+title: "July Presentation Helper Figures"
+output: html_notebook
+---
+
+
+```{r, Dependencies}
+library (data.table)
+library (ComplexHeatmap)
+library (ggplot2)
+source("..\\Helper_R_Scripts\\shortestPathFunctions.R")
+
+source("..\\Helper_R_Scripts\\ManageScriptData.R")
+WriteSessionInfo()
+WriteInstalledPackages()
+```
+
+
+```{r, import data 1}
+# Import Mehdi's subnet from netprop
+npout <- fread("..\\Input_Data\\MehdiNP_outputs_nonorm.txt") # x0 is input heat, xss_t is propagated heat
+npin <- fread("..\\Input_Data\\MehdiNP_inputs.txt")
+npout <- npout[pval < fdrt]
+
+
+# Import STRING PPI network and aliases
+#stringNet <- fread("https://stringdb-static.org/download/protein.links.detailed.v11.5/9606.protein.links.detailed.v11.5.txt.gz")
+stringNet <- fread("C:\\Users\\isido\\OneDrive\\Documents\\Krogan Lab Code\\Universal_Datasets\\STRING_files\\Human_9606.protein.links.detailed.v11.5.txt")
+stringSub <- stringNet[experimental >= 400]
+#aliases <- fread("https://stringdb-static.org/download/protein.aliases.v11.5/9606.protein.aliases.v11.5.txt.gz")
+aliases <- fread("C:\\Users\\isido\\OneDrive\\Documents\\Krogan Lab Code\\Universal_Datasets\\STRING_files\\Human_9606.protein.aliases.v11.5.txt")
+setnames(aliases, "#string_protein_id", "stringID")
+```
+
+
+```{r, create dsd matrix}
+#12,000 nodes, 200000 edges
+fwrite(stringSub[,.(protein1, protein2, confidence = experimental/1000)], "JulPresentation_MakingFigures_data\\stringEdges_fordsd.tsv")
+
+
+```
+
+
+
+

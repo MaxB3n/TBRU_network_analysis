@@ -1,4 +1,5 @@
 library (data.table)
+library(clusterProfiler)
 
 
 #' @param groupTable data.table with columns for gene symbols and group designtations

@@ -13,7 +13,7 @@ Crispr KO/KD data taken from [TBRU_integration_data](https://github.com/hawn-lab
 - ~~Calc pvalues for each centrality score~~
 - ~~Find KDs that are direct interactors of PPI and PPI and KD connected by only one hop~~
 - Try simple normalization of centrality measures and simple pvalue fdr using the measure/degree of each gene in starting network
-- Track which start and end node for each path
+- ~~Track which start and end node for each path~~
 - Run Weighted network with output heats as weights
 - Track which data's network propagation each protein in the network was added from, and then enrich paths for clinical data types.
 - Find dsd -> PAM clusters and enrich. *Try the same with network modularity clusters, see Cerami et al. 2010
@@ -27,7 +27,7 @@ Crispr KO/KD data taken from [TBRU_integration_data](https://github.com/hawn-lab
 ### ESX-1
 - lorum ipsum
 
-### 
+### Menangitis and Mortality
 
 
 
