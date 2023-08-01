@@ -68,7 +68,7 @@ find_ShortestPaths <- function(startpoints, targets, graph, distances = NULL, tr
 gen_NodeInfo <- function(pathsobj){
   
   pathsobj$edgemat <- matrix(pathsobj$edges, ncol = 2, byrow = T)
-  temp.graph <- simplify(igraph::graph_from_edgelist(pathsobj$edgemat) )
+  temp.graph <- igraph::simplify(igraph::graph_from_edgelist(pathsobj$edgemat) )
   
   nodeInfo <- data.table(string = pathsobj$nodes, betweenness = igraph::betweenness(temp.graph), degree = igraph::degree(temp.graph), eigen = igraph::evcent(temp.graph)$vector, reach = (ego_size(temp.graph, 2)-1)/(vcount(temp.graph)-1))
   nodeInfo[data.table(pathsobj$edges)[, .N, by = V1], npaths := i.N, on = .(string = V1)] 
@@ -160,13 +160,13 @@ normalize_ShortestPaths <- function(simulatedInfo, testInfo, useSim = TRUE, keyc
     
     testInfo[, c("normBetwn", "normDegree", "normEigen", "normReach", "normPaths") := .(betweenness/meanSimulatedInfo$betwn, degree/meanSimulatedInfo$degree, eigen/meanSimulatedInfo$eigen, reach/meanSimulatedInfo$reach, npaths/meanSimulatedInfo$npaths)]
     
-    pvals <- do.call(cbind, lapply( c("betweenness", "degree", "eigen", "reach", "npaths"), FUN = function(measureCol){
-      pvalCol <- data.table( applyPval(measureCol, testInfo, simulatedInfo, keycol = keycol))
-      setnames(pvalCol, "V1", paste0(measureCol, "_pval"))
-      return(pvalCol)
-    }))
+    #pvals <- do.call(cbind, lapply( c("betweenness", "degree", "eigen", "reach", "npaths"), FUN = function(measureCol){
+    #  pvalCol <- data.table( applyPval(measureCol, testInfo, simulatedInfo, keycol = keycol))
+    #  setnames(pvalCol, "V1", paste0(measureCol, "_pval"))
+    #  return(pvalCol)
+    #}))
     
-    testInfo <- cbind(testInfo, pvals)
+    #testInfo <- cbind(testInfo, pvals)
     return(testInfo)
   } else {
     
